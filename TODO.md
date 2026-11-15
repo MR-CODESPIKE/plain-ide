@@ -19,4 +19,4 @@
 
 ## Verification and delivery
 - [x] Add automated tests covering core workspace, editor, persistence, and run-flow behavior; run the tests and build checks. Final run: 7 test files, 27 tests passed; strict TypeScript check and production build passed; route manifest returned HTTP 200; browser verified Run, Ctrl+Enter, and terminal execution.
-- [ ] Push the completed project to a separate private GitHub repository, without changing the Manus-managed canonical repository.
+- [x] Push the completed project to a separate private GitHub repository: [MR-CODESPIKE/plain-ide](https://github.com/MR-CODESPIKE/plain-ide). The project remains on its Manus-managed canonical repository as well.
