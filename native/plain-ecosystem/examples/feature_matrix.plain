@@ -1,0 +1,30 @@
+# Plain feature matrix
+LET x = 5
+SET x = x * 2 + 1
+SAY "x=" + x
+LET nums = [1, 2, 3]
+SAY LENGTH(nums)
+APPEND(nums, 4)
+SAY nums[3]
+LET message = "plain"
+SAY UPPER(message)
+SAY LOWER("LOUD")
+SAY LENGTH(SPLIT("a,b", ","))
+LET person = {name: "Abdul", age: 21}
+SAY person.name
+IF x > 0 AND x < 20 THEN
+    SAY "in range"
+ELSE
+    SAY "out"
+END IF
+TO add a AS int, b AS int GIVES int
+    GIVE BACK a + b
+END TO
+LET sum = add(3, 4)
+SAY sum
+TRY
+    LET bad = 10 / 0
+    SAY bad
+CATCH error
+    SAY "caught: " + error
+END TRY

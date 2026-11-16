@@ -1,0 +1,23 @@
+CLASS Animal
+    LET name AS string
+    LET sound AS string
+
+    TO NEW n AS string, s AS string
+        SET name = n
+        SET sound = s
+    END TO
+
+    TO makeSound GIVES string
+        GIVE BACK name + " says " + sound
+    END TO
+END CLASS
+
+CLASS Dog EXTENDS Animal
+    TO bark GIVES string
+        GIVE BACK name + " barks!"
+    END TO
+END CLASS
+
+LET d = NEW Dog("Rex", "Woof")
+SAY d.makeSound()
+SAY d.bark()

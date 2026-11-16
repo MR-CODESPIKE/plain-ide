@@ -1,5 +1,6 @@
 import type { WorkspaceSnapshot } from '../types';
 import { DEFAULT_SNAPSHOT } from './defaultWorkspace';
+import { validateWorkspaceEntries } from './workspace';
 
 export const STORAGE_KEY = 'plain-ide.workspace.v1';
 
@@ -8,12 +9,18 @@ type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 function isSnapshot(value: unknown): value is WorkspaceSnapshot {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<WorkspaceSnapshot>;
-  return Array.isArray(item.entries) && Array.isArray(item.openPaths) &&
-    typeof item.activePath === 'string' && Array.isArray(item.dirtyPaths) &&
-    typeof item.explorerWidth === 'number' && typeof item.bottomHeight === 'number' &&
+  return Array.isArray(item.entries) && item.entries.length <= 5000 &&
+    Array.isArray(item.openPaths) && item.openPaths.length <= 5000 &&
+    typeof item.activePath === 'string' && item.activePath.length <= 512 &&
+    Array.isArray(item.dirtyPaths) && item.dirtyPaths.length <= 5000 &&
+    typeof item.explorerWidth === 'number' && Number.isFinite(item.explorerWidth) &&
+    typeof item.bottomHeight === 'number' && Number.isFinite(item.bottomHeight) &&
     (item.bottomTab === 'output' || item.bottomTab === 'terminal') &&
-    item.entries.every((entry) => entry && typeof entry.path === 'string' &&
-      (entry.kind === 'file' || entry.kind === 'folder') && typeof entry.content === 'string');
+    item.entries.every((entry) => entry && typeof entry.path === 'string' && entry.path.length <= 512 &&
+      (entry.kind === 'file' || entry.kind === 'folder') && typeof entry.content === 'string' &&
+      entry.content.length <= 1_000_000) &&
+    item.entries.reduce((total, entry) => total + entry.content.length, 0) <= 5_000_000 &&
+    validateWorkspaceEntries(item.entries);
 }
 
 export function restoreSnapshot(storage: StorageLike, key = STORAGE_KEY): WorkspaceSnapshot {

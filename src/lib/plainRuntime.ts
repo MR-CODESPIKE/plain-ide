@@ -135,10 +135,8 @@ class ExpressionParser {
 }
 
 function numeric(value: Value, line: number): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new PlainSyntaxError(`Expected a number, got “${value}”`, line);
+  const parsed = typeof value === 'number' ? value : typeof value === 'boolean' ? (value ? 1 : 0) : Number(value);
+  if (!Number.isFinite(parsed)) throw new PlainSyntaxError(`Expected a finite number, got “${value}”`, line);
   return parsed;
 }
 
@@ -267,10 +265,17 @@ export function runPlain(source: string): RunResult {
       } else {
         const start = Math.ceil(numeric(evaluate(statement.start, variables, statement.line), statement.line));
         const end = Math.floor(numeric(evaluate(statement.end, variables, statement.line), statement.line));
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) {
+          throw new PlainSyntaxError('REPEAT bounds must resolve to safe whole numbers', statement.line);
+        }
         const count = Math.max(0, end - start + 1);
-        if (count > MAX_LOOP_RANGE) throw new PlainSyntaxError(`Loop range exceeds the preview limit (${MAX_LOOP_RANGE})`, statement.line);
+        if (!Number.isSafeInteger(count) || count > MAX_LOOP_RANGE) {
+          throw new PlainSyntaxError(`Loop range exceeds the preview limit (${MAX_LOOP_RANGE})`, statement.line);
+        }
         const name = statement.name.toLocaleLowerCase();
-        for (let value = start; value <= end; value += 1) {
+        for (let index = 0; index < count; index += 1) {
+          const value = start + index;
+          if (!Number.isSafeInteger(value)) throw new PlainSyntaxError('REPEAT counter exceeded the safe integer range', statement.line);
           variables.set(name, value);
           execute(statement.body);
         }

@@ -8,7 +8,8 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:native": "node --test native/bridge/server.test.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",

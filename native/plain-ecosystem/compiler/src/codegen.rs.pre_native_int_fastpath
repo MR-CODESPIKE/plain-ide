@@ -1,0 +1,128 @@
+use std::collections::HashMap;
+use std::path::Path;
+use inkwell::{context::Context,module::Module,builder::Builder,values::{FunctionValue,PointerValue,BasicValueEnum,BasicMetadataValueEnum},types::BasicTypeEnum,IntPredicate};
+use crate::{ast::*,source::CompileError};
+
+type V<'ctx>=inkwell::values::BasicValueEnum<'ctx>;
+pub struct Codegen<'ctx>{pub ctx:&'ctx Context,pub module:Module<'ctx>,pub builder:Builder<'ctx>,ptr:inkwell::types::PointerType<'ctx>,runtime:HashMap<String,FunctionValue<'ctx>>,functions:HashMap<String,FunctionValue<'ctx>>,externs:HashMap<String,ExternFunction>,classes:HashMap<String,Class>,vars:Vec<HashMap<String,PointerValue<'ctx>>>,field_names:Vec<std::collections::HashSet<String>>,loops:Vec<(inkwell::basic_block::BasicBlock<'ctx>,inkwell::basic_block::BasicBlock<'ctx>)>,error_slot:Option<PointerValue<'ctx>>,pub diagnostics:Vec<CompileError>}
+impl<'ctx> Codegen<'ctx>{
+ pub fn new(ctx:&'ctx Context,name:&str)->Self{let m=ctx.create_module(name);let b=ctx.create_builder();let ptr=ctx.ptr_type(inkwell::AddressSpace::default());let mut g=Self{ctx,module:m,builder:b,ptr,runtime:HashMap::new(),functions:HashMap::new(),externs:HashMap::new(),classes:HashMap::new(),vars:Vec::new(),field_names:Vec::new(),loops:Vec::new(),error_slot:None,diagnostics:Vec::new()};g.declare_runtime();g}
+ fn declare_runtime(&mut self){let p=self.ptr.fn_type(&[self.ptr.into()],false);let pp=self.ptr.fn_type(&[self.ptr.into(),self.ptr.into()],false);let p0=self.ptr.fn_type(&[],false);let i8=self.ctx.i8_type();let i64=self.ctx.i64_type();let f64=self.ctx.f64_type();let cchar=self.ctx.ptr_type(inkwell::AddressSpace::default());let mut d=|n:&str,t:inkwell::types::FunctionType<'ctx>|{let f=self.module.add_function(n,t,None);self.runtime.insert(n.into(),f);};d("plain_int",self.ptr.fn_type(&[i64.into()],false));d("plain_float",self.ptr.fn_type(&[f64.into()],false));d("plain_bool",self.ptr.fn_type(&[i8.into()],false));d("plain_string",self.ptr.fn_type(&[cchar.into()],false));d("plain_error",self.ptr.fn_type(&[cchar.into()],false));d("plain_is_error",self.ctx.i8_type().fn_type(&[self.ptr.into()],false));d("plain_error_message",p);d("plain_truth",self.ctx.i8_type().fn_type(&[self.ptr.into()],false));d("plain_print",self.ctx.void_type().fn_type(&[self.ptr.into()],false));for n in ["plain_add","plain_sub","plain_mul","plain_div","plain_mod","plain_eq","plain_not_eq","plain_lt","plain_lte","plain_gt","plain_gte","plain_and","plain_or"]{d(n,pp);}d("plain_not",p);d("plain_list_new",self.ptr.fn_type(&[i64.into(),self.ptr.into()],false));d("plain_list_get",pp);d("plain_list_set",self.ptr.fn_type(&[self.ptr.into(),self.ptr.into(),self.ptr.into()],false));d("plain_append",pp);d("plain_remove",pp);d("plain_length",p);d("plain_upper",p);d("plain_lower",p);d("plain_split",pp);d("plain_dict_new",self.ptr.fn_type(&[i64.into(),self.ptr.into()],false));d("plain_dict_get",pp);d("plain_dict_set",self.ptr.fn_type(&[self.ptr.into(),self.ptr.into(),self.ptr.into()],false));d("plain_new_instance",p0);d("plain_read",self.ptr.fn_type(&[self.ptr.into(),i64.into()],false));for n in ["plain_abs","plain_sqrt","plain_floor","plain_ceil","plain_sin","plain_cos"]{d(n,p);}for n in ["plain_pow","plain_contains","plain_starts_with","plain_ends_with","plain_join","plain_range","plain_write_file"]{d(n,pp);}for n in ["plain_read_file","plain_env"]{d(n,p);}d("plain_now_ms",self.ptr.fn_type(&[],false));}
+ fn ptr_type_cchar(&self)->inkwell::types::PointerType<'ctx>{self.ctx.i8_type().ptr_type(inkwell::AddressSpace::default())}
+ pub fn compile(mut self,p:&Program)->Result<Module<'ctx>,CompileError>{for i in &p.items{if let Item::Class(c)=i{self.classes.insert(c.name.clone(),c.clone());}}for i in &p.items{if let Item::Extern(x)=i{self.externs.insert(x.name.clone(),x.clone());let ty=self.ptr.fn_type(&vec![self.ptr.into();x.params.len()],false);self.functions.insert(x.name.clone(),self.module.add_function(&x.name,ty,None));}}for i in &p.items{if let Item::Function(f)=i{self.declare_user(f,"fn");}if let Item::Class(c)=i{for m in &c.methods{self.declare_user(m,&format!("{}__",c.name));}}}let main_t=self.ctx.i32_type().fn_type(&[],false);let main=self.module.add_function("main",main_t,None);let entry=self.ctx.append_basic_block(main,"entry");self.builder.position_at_end(entry);self.vars.push(HashMap::new());for i in &p.items{if let Item::Stmt(s)=i{self.emit_stmt(s)?;}}if self.builder.get_insert_block().unwrap().get_terminator().is_none(){self.builder.build_return(Some(&self.ctx.i32_type().const_int(0,false))).unwrap();}self.vars.pop();for i in &p.items{match i{Item::Function(f)=>self.emit_function(f,"fn")?,Item::Class(c)=>for m in &c.methods{self.emit_method(c,m)?},Item::Use(_,sp)=>return Err(CompileError::new(*sp,"module imports must be resolved before code generation")),_=>{}}}if self.diagnostics.is_empty(){Ok(self.module)}else{Err(self.diagnostics.remove(0))}}
+ fn declare_user(&mut self,f:&Function,prefix:&str){let n=if prefix=="fn"{f.name.clone()}else{format!("{}{}",prefix,f.name)};let ty=self.ptr.fn_type(&vec![self.ptr.into();f.params.len()+if prefix=="fn"{0}else{1}],false);self.functions.insert(n.clone(),self.module.add_function(&n,ty,None));}
+ fn emit_function(&mut self,f:&Function,prefix:&str)->Result<(),CompileError>{let n=if prefix=="fn"{f.name.clone()}else{format!("{}{}",prefix,f.name)};let fun=self.functions[&n];let entry=self.ctx.append_basic_block(fun,"entry");self.builder.position_at_end(entry);self.vars.push(HashMap::new());for(i,(name,_))in f.params.iter().enumerate(){let slot=self.builder.build_alloca(self.ptr,name).unwrap();self.builder.build_store(slot,fun.get_nth_param(i as u32).unwrap()).unwrap();self.vars.last_mut().unwrap().insert(name.clone(),slot);}for s in &f.body{self.emit_stmt(s)?;}if self.builder.get_insert_block().unwrap().get_terminator().is_none(){self.builder.build_return(Some(&self.null_value())).unwrap();}self.vars.pop();Ok(())}
+ fn emit_method(&mut self,c:&Class,f:&Function)->Result<(),CompileError>{let n=format!("{}__{}",c.name,f.name);let fun=self.functions[&n];let entry=self.ctx.append_basic_block(fun,"entry");self.builder.position_at_end(entry);self.vars.push(HashMap::new());let mut fields=std::collections::HashSet::new();self.collect_fields(&c.name,&mut fields);self.field_names.push(fields);let self_slot=self.builder.build_alloca(self.ptr,"self").unwrap();self.builder.build_store(self_slot,fun.get_nth_param(0).unwrap()).unwrap();self.vars.last_mut().unwrap().insert("self".into(),self_slot);for(i,(name,_))in f.params.iter().enumerate(){let slot=self.builder.build_alloca(self.ptr,name).unwrap();self.builder.build_store(slot,fun.get_nth_param((i+1) as u32).unwrap()).unwrap();self.vars.last_mut().unwrap().insert(name.clone(),slot);}for s in &f.body{self.emit_stmt(s)?;}if self.builder.get_insert_block().unwrap().get_terminator().is_none(){self.builder.build_return(Some(&self.null_value())).unwrap();}self.field_names.pop();self.vars.pop();Ok(())}
+ fn collect_fields(&self,name:&str,out:&mut std::collections::HashSet<String>){if let Some(c)=self.classes.get(name){if let Some(parent)=&c.parent{self.collect_fields(parent,out)}for(f,_)in &c.fields{out.insert(f.clone());}}}
+ fn method_key(&self,class_name:&str,method:&str)->Option<String>{let direct=format!("{}__{}",class_name,method);if self.functions.contains_key(&direct){return Some(direct)}self.classes.get(class_name).and_then(|c|c.parent.as_ref()).and_then(|p|self.method_key(p,method))}
+ fn null_value(&self)->V<'ctx>{self.runtime["plain_bool"].get_type().get_return_type().unwrap().into_pointer_type().const_null().into()}
+ fn runtime(&self,n:&str,args:&[BasicMetadataValueEnum<'ctx>])->V<'ctx>{self.builder.build_call(self.runtime[n],args,&format!("{}_tmp",n)).unwrap().try_as_basic_value().left().unwrap()}
+ fn call_user(&self,n:&str,args:&[BasicMetadataValueEnum<'ctx>])->V<'ctx>{self.builder.build_call(self.functions[n],args,&format!("{}_call",n)).unwrap().try_as_basic_value().left().unwrap()}
+ fn alloc_values(&self,vals:&[V<'ctx>],name:&str)->PointerValue<'ctx>{let arr=self.builder.build_array_alloca(self.ptr,self.ctx.i64_type().const_int(vals.len() as u64,false),name).unwrap();for(i,v)in vals.iter().enumerate(){let p=unsafe{self.builder.build_gep(self.ptr,arr,&[self.ctx.i64_type().const_int(i as u64,false)],&format!("{}_{}",name,i)).unwrap()};self.builder.build_store(p,*v).unwrap();}arr}
+ fn emit_stmt(&mut self,s:&Stmt)->Result<Option<PointerValue<'ctx>>,CompileError>{match s{
+  Stmt::Let(ns,es,sp)=>{if ns.len()!=es.len(){return Err(CompileError::new(*sp,"LET names and values must match"))}let mut last=None;for((n,_),e)in ns.iter().zip(es){let v=self.emit_expr(e)?;let slot=self.builder.build_alloca(self.ptr,n).unwrap();self.builder.build_store(slot,v).unwrap();self.vars.last_mut().unwrap().insert(n.clone(),slot);last=Some(v.into_pointer_value());}Ok(last)},
+  Stmt::Set(ls,es,sp)=>{for(l,e)in ls.iter().zip(es){let v=self.emit_expr(e)?;self.assign(l,v,*sp)?;}Ok(None)},
+  Stmt::Say(e,_)=>{let v=self.emit_expr(e)?;self.builder.build_call(self.runtime["plain_print"],&[v.into()],"").unwrap();Ok(Some(v.into_pointer_value()))},
+  Stmt::Ask{prompt,name,ty,..}=>{let p=self.emit_expr(prompt)?;let kind=match ty{Type::Int=>1,Type::Float=>2,Type::Bool=>3,_=>4};let prompt_ptr=self.to_cstr(p);let read_fn=self.runtime["plain_read"];let kind_value=self.ctx.i64_type().const_int(kind,false);let v=self.builder.build_call(read_fn,&[prompt_ptr.into(),kind_value.into()],"read").unwrap().try_as_basic_value().left().unwrap();let slot=self.builder.build_alloca(self.ptr,name).unwrap();self.builder.build_store(slot,v).unwrap();self.vars.last_mut().unwrap().insert(name.clone(),slot);Ok(Some(v.into_pointer_value()))},
+  Stmt::Expr(e)=>Ok(Some(self.emit_expr(e)?.into_pointer_value())),
+  Stmt::Return(e,_)=>{let v=e.as_ref().map(|x|self.emit_expr(x)).transpose()?.unwrap_or_else(||self.null_value().into());self.builder.build_return(Some(&v)).unwrap();Ok(None)},
+  Stmt::Fail(e,_)=>{let v=self.emit_expr(e)?;let ev=v;self.builder.build_return(Some(&ev)).unwrap();Ok(Some(ev.into_pointer_value()))},
+  Stmt::Break(_)=>{if let Some((br,_))=self.loops.last(){self.builder.build_unconditional_branch(*br).unwrap();}Ok(None)},
+  Stmt::Continue(_)=>{if let Some((_,cont))=self.loops.last(){self.builder.build_unconditional_branch(*cont).unwrap();}Ok(None)},
+  Stmt::If{branches,else_body,..}=>{self.emit_if(branches,else_body)?;Ok(None)},
+  Stmt::Repeat(r,_)=>{self.emit_repeat(r)?;Ok(None)},
+  Stmt::Try{body,catch,catch_body,..}=>{self.emit_try(body,catch,catch_body)?;Ok(None)},
+ }}
+ fn to_cstr(&mut self,v:V<'ctx>)->PointerValue<'ctx>{v.into_pointer_value()}
+ fn assign(&mut self,l:&Expr,v:V<'ctx>,sp:crate::source::Span)->Result<(),CompileError>{match l{Expr::Var(n,_)=>{let is_field=self.field_names.last().map(|f|f.contains(n)).unwrap_or(false);if is_field{let self_slot=self.vars.iter().rev().find_map(|m|m.get("self")).copied().unwrap();let obj=self.builder.build_load(self.ptr,self_slot,"self").unwrap();let key=self.const_string(n);self.runtime("plain_dict_set",&[obj.into(),key.into(),v.into()]);Ok(())}else{let slot=self.vars.iter().rev().find_map(|m|m.get(n)).copied().ok_or_else(||CompileError::new(sp,format!("SET requires existing variable `{}`",n)))?;self.builder.build_store(slot,v).unwrap();Ok(())}},Expr::Index{object,index,..}=>{let o=self.emit_expr(object)?;let i=self.emit_expr(index)?;self.runtime("plain_list_set",&[o.into(),i.into(),v.into()]);Ok(())},Expr::Member{object,name,..}=>{let o=self.emit_expr(object)?;let k=self.const_string(name);self.runtime("plain_dict_set",&[o.into(),k.into(),v.into()]);Ok(())},_=>Err(CompileError::new(sp,"SET target must be a variable, index, or field"))}}
+ fn emit_if(&mut self,branches:&[(Expr,Vec<Stmt>)],else_body:&[Stmt])->Result<(),CompileError>{let fun=self.builder.get_insert_block().unwrap().get_parent().unwrap();let end=self.ctx.append_basic_block(fun,"if_end");let mut next=None;for(c,b)in branches{let test=next.unwrap_or_else(||self.builder.get_insert_block().unwrap());self.builder.position_at_end(test);let v=self.emit_expr(c)?;let truth=self.builder.build_call(self.runtime["plain_truth"],&[v.into()],"truth").unwrap().try_as_basic_value().left().unwrap().into_int_value();let zero=self.ctx.i8_type().const_zero();let cond=self.builder.build_int_compare(IntPredicate::NE,truth,zero,"cond").unwrap();let thenb=self.ctx.append_basic_block(fun,"if_then");let elseb=self.ctx.append_basic_block(fun,"if_else");self.builder.build_conditional_branch(cond,thenb,elseb).unwrap();self.builder.position_at_end(thenb);for s in b{self.emit_stmt(s)?;}if self.builder.get_insert_block().unwrap().get_terminator().is_none(){self.builder.build_unconditional_branch(end).unwrap();}next=Some(elseb);}let e=next.unwrap_or_else(||self.builder.get_insert_block().unwrap());self.builder.position_at_end(e);for s in else_body{self.emit_stmt(s)?;}if self.builder.get_insert_block().unwrap().get_terminator().is_none(){self.builder.build_unconditional_branch(end).unwrap();}self.builder.position_at_end(end);Ok(())}
+ fn emit_repeat(&mut self, r: &Repeat) -> Result<(), CompileError> {
+  let fun = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+  let head = self.ctx.append_basic_block(fun, "repeat_head");
+  let body = self.ctx.append_basic_block(fun, "repeat_body");
+  let end = self.ctx.append_basic_block(fun, "repeat_end");
+  let mut loop_slot = None;
+  let mut each_slot = None;
+  let mut each_value = None;
+  match r {
+   Repeat::Counted { name, start, .. } => {
+    let slot = self.builder.build_alloca(self.ptr, name).unwrap();
+    let value = self.emit_expr(start)?;
+    self.builder.build_store(slot, value).unwrap();
+    self.vars.last_mut().unwrap().insert(name.clone(), slot);
+    loop_slot = Some(slot);
+   }
+   Repeat::Each { name, .. } => {
+    let index = self.builder.build_alloca(self.ptr, "each_index").unwrap();
+    let zero = self.runtime("plain_int", &[self.ctx.i64_type().const_zero().into()]);
+    self.builder.build_store(index, zero).unwrap();
+    self.vars.last_mut().unwrap().insert("each_index".into(), index);
+    each_slot = Some(index);
+    let value = self.builder.build_alloca(self.ptr, name).unwrap();
+    self.vars.last_mut().unwrap().insert(name.clone(), value);
+    each_value = Some(value);
+   }
+   Repeat::While { .. } => {}
+  }
+  self.builder.build_unconditional_branch(head).unwrap();
+  self.builder.position_at_end(head);
+  match r {
+   Repeat::While { cond, .. } => {
+    let value = self.emit_expr(cond)?;
+    let truth = self.builder.build_call(self.runtime["plain_truth"], &[value.into()], "truth").unwrap().try_as_basic_value().left().unwrap().into_int_value();
+    let condition = self.builder.build_int_compare(IntPredicate::NE, truth, self.ctx.i8_type().const_zero(), "while").unwrap();
+    self.builder.build_conditional_branch(condition, body, end).unwrap();
+   }
+   Repeat::Counted { end: end_expr, .. } => {
+    let current = self.builder.build_load(self.ptr, loop_slot.unwrap(), "loop_value").unwrap();
+    let limit = self.emit_expr(end_expr)?;
+    let less = self.runtime("plain_lt", &[current.into(), limit.into()]);
+    let equal = self.runtime("plain_eq", &[current.into(), limit.into()]);
+    let allowed = self.runtime("plain_or", &[less.into(), equal.into()]);
+    let truth = self.builder.build_call(self.runtime["plain_truth"], &[allowed.into()], "truth").unwrap().try_as_basic_value().left().unwrap().into_int_value();
+    let condition = self.builder.build_int_compare(IntPredicate::NE, truth, self.ctx.i8_type().const_zero(), "counted").unwrap();
+    self.builder.build_conditional_branch(condition, body, end).unwrap();
+   }
+   Repeat::Each { iter, .. } => {
+    let list = self.emit_expr(iter)?;
+    let index = self.builder.build_load(self.ptr, each_slot.unwrap(), "each_index").unwrap();
+    let length = self.runtime("plain_length", &[list.into()]);
+    let allowed = self.runtime("plain_lt", &[index.into(), length.into()]);
+    let truth = self.builder.build_call(self.runtime["plain_truth"], &[allowed.into()], "truth").unwrap().try_as_basic_value().left().unwrap().into_int_value();
+    if let Some(value_slot) = each_value {
+     let item = self.runtime("plain_list_get", &[list.into(), index.into()]);
+     self.builder.build_store(value_slot, item).unwrap();
+    }
+    let condition = self.builder.build_int_compare(IntPredicate::NE, truth, self.ctx.i8_type().const_zero(), "each").unwrap();
+    self.builder.build_conditional_branch(condition, body, end).unwrap();
+   }
+  }
+  self.builder.position_at_end(body);
+  self.loops.push((end, head));
+  let statements = match r { Repeat::Counted { body, .. } | Repeat::While { body, .. } | Repeat::Each { body, .. } => body };
+  for statement in statements { self.emit_stmt(statement)?; }
+  self.loops.pop();
+  if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+   if let Some(slot) = loop_slot {
+    let current = self.builder.build_load(self.ptr, slot, "loop_value").unwrap();
+    let one = self.runtime("plain_int", &[self.ctx.i64_type().const_int(1, false).into()]);
+    let next = self.runtime("plain_add", &[current.into(), one.into()]);
+    self.builder.build_store(slot, next).unwrap();
+   }
+   if let Some(slot) = each_slot {
+    let current = self.builder.build_load(self.ptr, slot, "each_index").unwrap();
+    let one = self.runtime("plain_int", &[self.ctx.i64_type().const_int(1, false).into()]);
+    let next = self.runtime("plain_add", &[current.into(), one.into()]);
+    self.builder.build_store(slot, next).unwrap();
+   }
+   self.builder.build_unconditional_branch(head).unwrap();
+  }
+  self.builder.position_at_end(end);
+  Ok(())
+}
+ fn emit_try(&mut self,body:&[Stmt],catch:&str,cb:&[Stmt])->Result<(),CompileError>{let fun=self.builder.get_insert_block().unwrap().get_parent().unwrap();let catchb=self.ctx.append_basic_block(fun,"catch");let end=self.ctx.append_basic_block(fun,"try_end");let slot=self.builder.build_alloca(self.ptr,"error").unwrap();let old=self.error_slot.replace(slot);for s in body{if let Some(v)=self.emit_stmt(s)?{self.guard(v,catchb)?;}}if self.builder.get_insert_block().unwrap().get_terminator().is_none(){self.builder.build_unconditional_branch(end).unwrap();}self.builder.position_at_end(catchb);let es=self.builder.build_alloca(self.ptr,catch).unwrap();self.builder.build_store(es,self.builder.build_load(self.ptr,slot,"error").unwrap()).unwrap();self.vars.last_mut().unwrap().insert(catch.to_string(),es);for s in cb{self.emit_stmt(s)?;}if self.builder.get_insert_block().unwrap().get_terminator().is_none(){self.builder.build_unconditional_branch(end).unwrap();}self.builder.position_at_end(end);self.error_slot=old;Ok(())}
+ fn guard(&mut self,v:PointerValue<'ctx>,catch:inkwell::basic_block::BasicBlock<'ctx>)->Result<(),CompileError>{let t=self.builder.build_call(self.runtime["plain_is_error"],&[v.into()],"is_error").unwrap().try_as_basic_value().left().unwrap().into_int_value();let c=self.builder.build_int_compare(IntPredicate::NE,t,self.ctx.i8_type().const_zero(),"error_cond").unwrap();let cont=self.ctx.append_basic_block(self.builder.get_insert_block().unwrap().get_parent().unwrap(),"try_continue");if let Some(slot)=self.error_slot{self.builder.build_store(slot,v).unwrap();}self.builder.build_conditional_branch(c,catch,cont).unwrap();self.builder.position_at_end(cont);Ok(())}
+ fn emit_expr(&mut self,e:&Expr)->Result<V<'ctx>,CompileError>{match e{Expr::Int(n,_)=>Ok(self.runtime("plain_int",&[self.ctx.i64_type().const_int(*n as u64,true).into()])),Expr::Float(n,_)=>Ok(self.runtime("plain_float",&[self.ctx.f64_type().const_float(*n).into()])),Expr::Bool(b,_)=>Ok(self.runtime("plain_bool",&[self.ctx.i8_type().const_int(*b as u64,false).into()])),Expr::Str(s,_)=>Ok(self.const_string(s).into()),Expr::Var(n,sp)=>{let is_field=self.field_names.last().map(|f|f.contains(n)).unwrap_or(false);if is_field{let self_slot=self.vars.iter().rev().find_map(|m|m.get("self")).copied().unwrap();let obj=self.builder.build_load(self.ptr,self_slot,"self").unwrap();let key=self.const_string(n);Ok(self.runtime("plain_dict_get",&[obj.into(),key.into()]))}else if let Some(slot)=self.vars.iter().rev().find_map(|m|m.get(n)){Ok(self.builder.build_load(self.ptr,*slot,n).unwrap())}else{Err(CompileError::new(*sp,format!("unknown variable `{}`",n)))}},Expr::List(xs,_)=>{let vs=xs.iter().map(|x|self.emit_expr(x)).collect::<Result<Vec<_>,_>>()?;let a=self.alloc_values(&vs,"list");Ok(self.runtime("plain_list_new",&[self.ctx.i64_type().const_int(vs.len() as u64,false).into(),a.into()]))},Expr::Dict(ps,_)=>{let mut vs=Vec::new();for(k,v)in ps{vs.push(self.emit_expr(k)?);vs.push(self.emit_expr(v)?);}let a=self.alloc_values(&vs,"dict");Ok(self.runtime("plain_dict_new",&[self.ctx.i64_type().const_int((vs.len()/2) as u64,false).into(),a.into()]))},Expr::Unary{op,expr,..}=>{let v=self.emit_expr(expr)?;if matches!(op,Unary::Not){let args=[v.into()];Ok(self.runtime("plain_not",&args))}else{let zero=self.runtime("plain_int",&[self.ctx.i64_type().const_zero().into()]);let args=[zero.into(),v.into()];Ok(self.runtime("plain_sub",&args))}},Expr::Binary{left,op,right,..}=>{let a=self.emit_expr(left)?;let b=self.emit_expr(right)?;Ok(self.runtime(match op{Binary::Add=>"plain_add",Binary::Sub=>"plain_sub",Binary::Mul=>"plain_mul",Binary::Div=>"plain_div",Binary::Mod=>"plain_mod",Binary::Eq=>"plain_eq",Binary::NotEq=>"plain_not_eq",Binary::Lt=>"plain_lt",Binary::Lte=>"plain_lte",Binary::Gt=>"plain_gt",Binary::Gte=>"plain_gte",Binary::And=>"plain_and",Binary::Or=>"plain_or"},&[a.into(),b.into()]))},Expr::Index{object,index,..}=>{let o=self.emit_expr(object)?;let i=self.emit_expr(index)?;Ok(self.runtime("plain_list_get",&[o.into(),i.into()]))},Expr::Member{object,name,..}=>{let o=self.emit_expr(object)?;let k=self.const_string(name);let args=[o.into(),k.into()];Ok(self.runtime("plain_dict_get",&args))},Expr::Ternary{yes,cond,no,..}=>{let fun=self.builder.get_insert_block().unwrap().get_parent().unwrap();let tb=self.ctx.append_basic_block(fun,"ternary_yes");let nb=self.ctx.append_basic_block(fun,"ternary_no");let end=self.ctx.append_basic_block(fun,"ternary_end");let c=self.emit_expr(cond)?;let t=self.builder.build_call(self.runtime["plain_truth"],&[c.into()],"truth").unwrap().try_as_basic_value().left().unwrap().into_int_value();self.builder.build_conditional_branch(self.builder.build_int_compare(IntPredicate::NE,t,self.ctx.i8_type().const_zero(),"t").unwrap(),tb,nb).unwrap();self.builder.position_at_end(tb);let y=self.emit_expr(yes)?;self.builder.build_unconditional_branch(end).unwrap();self.builder.position_at_end(nb);let n=self.emit_expr(no)?;self.builder.build_unconditional_branch(end).unwrap();self.builder.position_at_end(end);let phi=self.builder.build_phi(self.ptr,"ternary").unwrap();phi.add_incoming(&[(&y,tb),(&n,nb)]);Ok(phi.as_basic_value())},Expr::Call{callee,args,..}=>{let av=args.iter().map(|a|self.emit_expr(a).map(Into::into)).collect::<Result<Vec<BasicMetadataValueEnum>,_>>()?;match &**callee{Expr::Var(n,sp)=>{if let Some(class_name)=n.strip_prefix("NEW::"){let instance=self.runtime("plain_new_instance",&[]);if let Some(key)=self.method_key(class_name,"NEW"){let mut ctor_args=vec![instance.into()];ctor_args.extend(av);let _=self.call_user(&key,&ctor_args);}Ok(instance)}else{let builtin=match n.as_str(){"APPEND"=>"plain_append","REMOVE"=>"plain_remove","LENGTH"=>"plain_length","UPPER"=>"plain_upper","LOWER"=>"plain_lower","SPLIT"=>"plain_split","ABS"=>"plain_abs","SQRT"=>"plain_sqrt","POW"=>"plain_pow","FLOOR"=>"plain_floor","CEIL"=>"plain_ceil","SIN"=>"plain_sin","COS"=>"plain_cos","CONTAINS"=>"plain_contains","STARTS_WITH"=>"plain_starts_with","ENDS_WITH"=>"plain_ends_with","JOIN"=>"plain_join","RANGE"=>"plain_range","READ_FILE"=>"plain_read_file","WRITE_FILE"=>"plain_write_file","ENV"=>"plain_env","NOW_MS"=>"plain_now_ms",_=>n.as_str()};if let Some(f)=self.runtime.get(builtin){Ok(self.builder.build_call(*f,&av,"builtin").unwrap().try_as_basic_value().left().unwrap())}else if let Some(ext)=self.externs.get(n){if av.len()!=ext.params.len(){return Err(CompileError::new(*sp,format!("external function `{}` expects {} arguments, got {}",n,ext.params.len(),av.len())))}for (arg,(_,ty)) in args.iter().zip(&ext.params){if !Self::ffi_compatible(arg,ty){return Err(CompileError::new(arg.span(),format!("argument type does not match external function `{}`",n)))}}Ok(self.call_user(n,&av))}else if self.functions.contains_key(n){Ok(self.call_user(n,&av))}else{Err(CompileError::new(*sp,format!("unknown function `{}`",n)))}}},Expr::Member{object,name,..}=>{let o=self.emit_expr(object)?;let mut args2=vec![o.into()];args2.extend(av);let class_name=self.classes.keys().find(|c|self.functions.contains_key(&format!("{}__{}",c,name))).cloned();let key=class_name.as_deref().and_then(|c|self.method_key(c,name)).or_else(||self.functions.keys().find(|k|k.ends_with(&format!("__{}",name))).cloned()).ok_or_else(||CompileError::new(callee.span(),format!("unknown method `{}`",name)))?;Ok(self.call_user(&key,&args2))},_=>Err(CompileError::new(callee.span(),"invalid call target"))}},}}
+ fn ffi_compatible(expr:&Expr,ty:&Type)->bool{match (expr,ty){(Expr::Int(..),Type::Int)|(Expr::Float(..),Type::Float)|(Expr::Bool(..),Type::Bool)|(Expr::Str(..),Type::String)=>true,(_,Type::Any)=>true,(Expr::Int(..),_)|(Expr::Float(..),_)|(Expr::Bool(..),_)|(Expr::Str(..),_)=>false,(_,_)=>true}}
+ fn const_string(&mut self,s:&str)->PointerValue<'ctx>{let g=self.builder.build_global_string_ptr(s,"str").unwrap();self.runtime("plain_string",&[g.as_pointer_value().into()]).into_pointer_value()}
+}

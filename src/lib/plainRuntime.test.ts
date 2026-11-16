@@ -40,4 +40,17 @@ describe('Plain browser preview runner', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain('Loop range exceeds');
   });
+
+  it('rejects non-finite arithmetic before it can stall a counted loop', () => {
+    const huge = '9'.repeat(400);
+    const result = runPlain(`LET huge = ${huge} * ${huge}\nREPEAT i FROM huge TO huge\nSAY i\nEND REPEAT`);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('finite number');
+  });
+
+  it('rejects counted-loop bounds that cannot be incremented safely', () => {
+    const result = runPlain('REPEAT i FROM 9007199254740992 TO 9007199254740992\nSAY i\nEND REPEAT');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('safe whole numbers');
+  });
 });

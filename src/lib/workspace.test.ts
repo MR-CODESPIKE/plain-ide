@@ -44,4 +44,18 @@ describe('workspace tree operations', () => {
   it('deletes a folder and all nested entries', () => {
     expect(deleteEntry(seed, 'src')).toEqual([seed[4]]);
   });
+
+  it('prevents files from becoming parents of other workspace entries', () => {
+    expect(() => createFile(seed, 'src/main.plain/child.plain')).toThrow(/is a file/i);
+    expect(() => createFile(seed, 'src')).toThrow(/already exists/i);
+    expect(() => createFile([{ path: 'docs/guide.md', kind: 'file', content: '' }], 'docs')).toThrow(/already contains entries/i);
+  });
+
+  it('rejects rename operations that create file/folder prefix conflicts', () => {
+    const entries = [
+      { path: 'a.plain', kind: 'file' as const, content: '' },
+      { path: 'docs/readme.md', kind: 'file' as const, content: '' },
+    ];
+    expect(() => renameEntry(entries, 'a.plain', 'docs')).toThrow(/conflict|overwrite/i);
+  });
 });

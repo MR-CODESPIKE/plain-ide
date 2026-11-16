@@ -1,0 +1,2 @@
+EXTERN "plain_ml" FUNCTION plain_ffi_add_numbers(a AS int, b AS int) GIVES int
+SAY plain_ffi_add_numbers("wrong", 2)

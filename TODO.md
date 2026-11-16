@@ -20,3 +20,16 @@
 ## Verification and delivery
 - [x] Add automated tests covering core workspace, editor, persistence, and run-flow behavior; run the tests and build checks. Final run: 7 test files, 27 tests passed; strict TypeScript check and production build passed; route manifest returned HTTP 200; browser verified Run, Ctrl+Enter, and terminal execution.
 - [x] Push the completed project to a separate private GitHub repository: [MR-CODESPIKE/plain-ide](https://github.com/MR-CODESPIKE/plain-ide). The project remains on its Manus-managed canonical repository as well.
+
+
+## Native offline compiler integration (implementation added)
+
+- [x] Bundle the actual Plain Ecosystem compiler/runtime/ML source tree.
+- [x] Add a loopback-only token-authenticated Node bridge for check/run/build.
+- [x] Stage complete workspace files so `USE` imports are available to the compiler.
+- [x] Add Windows and Android/Termux setup scripts, plus Android Ubuntu-proot fallback.
+- [x] Add offline PWA shell caching and local native compiler connection UI.
+- [x] Clearly label browser preview mode versus actual native compiler mode.
+- [ ] Build and run the compiler on Windows with LLVM 18 / MSVC.
+- [ ] Build and run the compiler on Android ARM64 with LLVM 18.
+- [ ] Run the full existing Vitest suite and production Vite build after installing dependencies.

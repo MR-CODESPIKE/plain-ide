@@ -1,0 +1,30 @@
+# Train a neural network from Plain: XOR, then save, reload and use the copy.
+EXTERN "plain_ml" FUNCTION plain_nn_create(layers AS any, seed AS int) GIVES any
+EXTERN "plain_ml" FUNCTION plain_nn_train(net AS any, inputs AS any, labels AS any, options AS any) GIVES any
+EXTERN "plain_ml" FUNCTION plain_nn_predict(net AS any, input AS any) GIVES any
+EXTERN "plain_ml" FUNCTION plain_nn_accuracy(net AS any, inputs AS any, labels AS any) GIVES any
+EXTERN "plain_ml" FUNCTION plain_nn_parameter_count(net AS any) GIVES any
+EXTERN "plain_ml" FUNCTION plain_nn_save(net AS any, path AS string) GIVES any
+EXTERN "plain_ml" FUNCTION plain_nn_load(path AS string) GIVES any
+EXTERN "plain_ml" FUNCTION plain_nn_free(net AS any) GIVES any
+
+LET inputs = [[0, 0], [0, 1], [1, 0], [1, 1]]
+LET labels = [0, 1, 1, 0]
+
+LET net = plain_nn_create([2, 8, 2], 7)
+SAY plain_nn_parameter_count(net)
+
+LET loss = plain_nn_train(net, inputs, labels, {epochs: 300, learning_rate: 0.05, batch_size: 4, seed: 1})
+IF loss < 0.05 THEN
+    SAY "trained"
+END IF
+SAY plain_nn_accuracy(net, inputs, labels) = 1
+SAY plain_nn_predict(net, [1, 0])
+
+LET saved = plain_nn_save(net, "/tmp/plain_xor.net")
+LET copy = plain_nn_load("/tmp/plain_xor.net")
+SAY plain_nn_predict(copy, [1, 1])
+
+SAY IS_ERROR(plain_nn_free(net))
+SAY IS_ERROR(plain_nn_free(net))
+SAY IS_ERROR(plain_nn_free(copy))

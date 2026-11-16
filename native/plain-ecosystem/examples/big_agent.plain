@@ -1,0 +1,41 @@
+EXTERN "plain_ml" FUNCTION plain_big_model_train(steps AS int) GIVES any
+EXTERN "plain_ml" FUNCTION plain_big_model_parameter_count(model AS any) GIVES int
+EXTERN "plain_ml" FUNCTION plain_big_model_loss(model AS any) GIVES float
+EXTERN "plain_ml" FUNCTION plain_big_model_accuracy(model AS any) GIVES float
+EXTERN "plain_ml" FUNCTION plain_big_model_predict(model AS any, token AS int) GIVES int
+EXTERN "plain_ml" FUNCTION plain_big_model_heldout_accuracy(model AS any) GIVES float
+EXTERN "plain_ml" FUNCTION plain_big_model_coverage(model AS any) GIVES float
+
+LET model = plain_big_model_train(20000)
+LET parameters = plain_big_model_parameter_count(model)
+LET loss = plain_big_model_loss(model)
+LET accuracy = plain_big_model_accuracy(model)
+
+LET heldout = plain_big_model_heldout_accuracy(model)
+LET coverage = plain_big_model_coverage(model)
+
+SAY "Plain agent observation:"
+SAY parameters
+SAY loss
+SAY "accuracy on trained tokens:"
+SAY accuracy
+SAY "accuracy on held-out tokens (25% is chance level for this synthetic task):"
+SAY heldout
+SAY "share of the vocabulary that was trained:"
+SAY coverage
+
+LET report = "needs-more-training"
+IF parameters = 10000000 AND accuracy >= 0.75 THEN
+    SAY "Plain agent decision: model is ready"
+    SET report = "ready"
+ELSE
+    SAY "Plain agent decision: model needs more training"
+END IF
+
+REPEAT token FROM 0 TO 7
+    SAY plain_big_model_predict(model, token)
+END REPEAT
+
+SAY WRITE_FILE("/tmp/plain_10m_agent_report.txt", report)
+SAY READ_FILE("/tmp/plain_10m_agent_report.txt")
+SAY "Plain agent action complete"

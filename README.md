@@ -31,3 +31,14 @@ The Vitest suite covers workspace operations, the CodeMirror editor and shortcut
 - **Terminal:** this is a virtual workspace command runner, not an operating-system shell. It supports `help`, `pwd`, `ls`, `cat`, `find`, `plain check`, `plain run`, and `clear`; it cannot execute arbitrary system commands.
 
 The web app is intentionally static and does not include sign-in, shared cloud files, or durable server-side project storage. The file-storage power-up was not selected in the approved blueprint.
+
+
+## Full native compiler and offline mode
+
+The browser preview remains a limited subset. For full Plain language support, use the local Rust/LLVM compiler bridge in [`NATIVE_COMPILER.md`](NATIVE_COMPILER.md). The supplied Plain Ecosystem compiler, runtime, and ML sources are included under `native/plain-ecosystem/`.
+
+- Windows: run `scripts/setup-windows.ps1` after installing Rust, LLVM 18, Clang, Node.js, and Visual Studio C++ Build Tools.
+- Android: use Termux with LLVM 18 (`scripts/setup-termux.sh`), or Ubuntu 24.04 in Termux proot (`scripts/setup-android-ubuntu-proot.sh`).
+- Once the compiler/toolchain is built and the PWA shell has been cached, editing, checking, building, and running can work without internet.
+
+See [`NATIVE_COMPILER.md`](NATIVE_COMPILER.md) for setup, offline prerequisites, security limits, and platform caveats. Native Plain programs are not sandboxed.

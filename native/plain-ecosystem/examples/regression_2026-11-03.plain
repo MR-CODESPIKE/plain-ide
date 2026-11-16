@@ -1,0 +1,45 @@
+# Regression checks for the 2026-11-03 audit fixes. Run: plain examples/regression_2026-11-03.plain
+
+# 1. FAIL must produce a real error that TRY/CATCH can catch (also across a function call)
+TO risky n AS int GIVES int
+    IF n < 0 THEN
+        FAIL "negative not allowed"
+    END IF
+    GIVE BACK n * 2
+END TO
+
+TRY
+    LET a = risky(5)
+    SAY a
+    LET b = risky(-1)
+    SAY "NOT REACHED"
+CATCH error
+    SAY "caught: " + error
+END TRY
+
+# 2. FAIL directly inside TRY jumps to CATCH
+TRY
+    FAIL "direct fail"
+    SAY "NOT REACHED"
+CATCH e
+    SAY "caught: " + e
+END TRY
+
+# 3. Non-ASCII text in strings must survive (Yoruba, accents)
+SAY "héllo ọ̀rẹ́ ✓"
+
+# 4. NOT applies to the whole comparison: NOT (n > 10)
+LET n = 7
+IF NOT n > 10 THEN
+    SAY "NOT precedence ok"
+ELSE
+    SAY "NOT precedence WRONG"
+END IF
+
+# 5. Code after BREAK / GIVE BACK must not produce invalid IR
+REPEAT i FROM 1 TO 5
+    IF i = 3 THEN
+        BREAK
+    END IF
+    SAY i
+END REPEAT

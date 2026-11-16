@@ -1,0 +1,108 @@
+use std::collections::HashMap;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
+use std::ptr;
+
+#[repr(C)]
+pub struct PlainValue {
+    pub kind: i32,
+    pub i: i64,
+    pub f: f64,
+    pub b: i8,
+    pub ptr: *mut c_void,
+}
+
+const K_INT: i32 = 1;
+const K_FLOAT: i32 = 2;
+const K_BOOL: i32 = 3;
+const K_STRING: i32 = 4;
+const K_LIST: i32 = 5;
+const K_DICT: i32 = 6;
+const K_ERROR: i32 = 7;
+
+struct List { items: Vec<*mut PlainValue> }
+struct Dict { items: HashMap<String, *mut PlainValue> }
+
+fn value(kind: i32) -> *mut PlainValue { Box::into_raw(Box::new(PlainValue { kind, i: 0, f: 0.0, b: 0, ptr: ptr::null_mut() })) }
+fn string_value(kind: i32, s: &str) -> *mut PlainValue {
+    let p = CString::new(s.replace('\0', "\\0")).unwrap_or_default();
+    let v = value(kind);
+    unsafe { (*v).ptr = Box::into_raw(Box::new(p)) as *mut c_void; }
+    v
+}
+fn read_string(v: *mut PlainValue) -> String {
+    if v.is_null() { return String::new(); }
+    unsafe { CStr::from_ptr(((*v).ptr as *mut CString).as_ref().map(|x| x.as_ptr()).unwrap_or(ptr::null())).to_string_lossy().into_owned() }
+}
+fn type_error(msg: &str) -> *mut PlainValue { string_value(K_ERROR, msg) }
+
+#[no_mangle] pub extern "C" fn plain_int(n: i64) -> *mut PlainValue { let v=value(K_INT); unsafe{(*v).i=n}; v }
+#[no_mangle] pub extern "C" fn plain_float(n: f64) -> *mut PlainValue { let v=value(K_FLOAT); unsafe{(*v).f=n}; v }
+#[no_mangle] pub extern "C" fn plain_bool(b: i8) -> *mut PlainValue { let v=value(K_BOOL); unsafe{(*v).b=if b!=0{1}else{0}}; v }
+#[no_mangle] pub extern "C" fn plain_string(s: *const c_char) -> *mut PlainValue { if s.is_null(){string_value(K_STRING,"")}else{string_value(K_STRING,unsafe{CStr::from_ptr(s)}.to_string_lossy().as_ref())} }
+#[no_mangle] pub extern "C" fn plain_error(s: *const c_char) -> *mut PlainValue { if s.is_null(){type_error("Plain error")}else{string_value(K_ERROR,unsafe{CStr::from_ptr(s)}.to_string_lossy().as_ref())} }
+#[no_mangle] pub extern "C" fn plain_is_error(v:*mut PlainValue)->i8 { if v.is_null(){1}else{unsafe{if (*v).kind==K_ERROR{1}else{0}}} }
+#[no_mangle] pub extern "C" fn plain_error_message(v:*mut PlainValue)->*mut PlainValue { if v.is_null(){return string_value(K_STRING,"null value")}; if unsafe{(*v).kind}==K_ERROR{v}else{string_value(K_STRING,"unknown error")} }
+
+#[no_mangle] pub extern "C" fn plain_print(v:*mut PlainValue) {
+    if v.is_null(){println!("null");return}
+    let s=unsafe{match (*v).kind { K_INT=>(*v).i.to_string(), K_FLOAT=>(*v).f.to_string(), K_BOOL=>if (*v).b!=0{"TRUE".into()}else{"FALSE".into()}, K_STRING=>read_string(v), K_ERROR=>format!("Error: {}",read_string(v)), K_LIST=>{let l=&*((*v).ptr as *mut List);format!("[{}]",l.items.iter().map(|x|value_to_string(*x)).collect::<Vec<_>>().join(", "))}, K_DICT=>"{dict}".into(), _=>"<value>".into() }};
+    println!("{}",s);
+}
+fn value_to_string(v:*mut PlainValue)->String{if v.is_null(){return "null".into()} unsafe{match (*v).kind{K_INT=>(*v).i.to_string(),K_FLOAT=>(*v).f.to_string(),K_BOOL=>if (*v).b!=0{"TRUE".into()}else{"FALSE".into()},K_STRING|K_ERROR=>read_string(v),_=>"<value>".into()}}}
+
+fn num(a:*mut PlainValue)->Result<f64,*mut PlainValue>{if a.is_null(){Err(type_error("null is not a number"))}else{unsafe{match (*a).kind{K_INT=>Ok((*a).i as f64),K_FLOAT=>Ok((*a).f),_=>Err(type_error("expected a number"))}}}}
+type Result<T,E= *mut PlainValue>=std::result::Result<T,E>;
+fn numeric_result(x:f64, float:bool)->*mut PlainValue{if float{plain_float(x)}else{plain_int(x as i64)}}
+#[no_mangle] pub extern "C" fn plain_add(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{if unsafe{!a.is_null()&& !b.is_null()&&(*a).kind==K_STRING||(!a.is_null()&&(*a).kind==K_STRING)||(!b.is_null()&&(*b).kind==K_STRING)} {return string_value(K_STRING,&format!("{}{}",value_to_string(a),value_to_string(b)))}; match (num(a),num(b)){(Ok(x),Ok(y))=>numeric_result(x+y,unsafe{(*a).kind==K_FLOAT||(*b).kind==K_FLOAT}), (Err(e),_)|( _,Err(e))=>e}}
+#[no_mangle] pub extern "C" fn plain_sub(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{match(num(a),num(b)){(Ok(x),Ok(y))=>numeric_result(x-y,unsafe{(*a).kind==K_FLOAT||(*b).kind==K_FLOAT}),(Err(e),_)|(_,Err(e))=>e}}
+#[no_mangle] pub extern "C" fn plain_mul(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{match(num(a),num(b)){(Ok(x),Ok(y))=>numeric_result(x*y,unsafe{(*a).kind==K_FLOAT||(*b).kind==K_FLOAT}),(Err(e),_)|(_,Err(e))=>e}}
+#[no_mangle] pub extern "C" fn plain_div(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{match(num(a),num(b)){(Ok(x),Ok(y))=>{if y==0.0{type_error("Cannot divide by zero")}else{numeric_result(x/y,unsafe{(*a).kind==K_FLOAT||(*b).kind==K_FLOAT})}},(Err(e),_)|(_,Err(e))=>e}}
+fn cmp(a:*mut PlainValue,b:*mut PlainValue,op:&str)->*mut PlainValue{if a.is_null()||b.is_null(){return type_error("cannot compare null")};let r=unsafe{if (*a).kind==K_STRING||(*b).kind==K_STRING{let(x,y)=(value_to_string(a),value_to_string(b));match op{"="=>x==y,"<"=>x<y,">"=>x>y,_=>false}}else{let(x,y)=(num(a),num(b));match(x,y){(Ok(x),Ok(y))=>match op{"="=>x==y,"<"=>x<y,">"=>x>y,_=>false},_=>return type_error("cannot compare values")}}};plain_bool(r as i8)}
+#[no_mangle] pub extern "C" fn plain_eq(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{cmp(a,b,"=")}
+#[no_mangle] pub extern "C" fn plain_lt(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{cmp(a,b,"<")}
+#[no_mangle] pub extern "C" fn plain_gt(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{cmp(a,b,">")}
+#[no_mangle] pub extern "C" fn plain_truth(a:*mut PlainValue)->i8{if a.is_null(){return 0} unsafe{match (*a).kind{K_BOOL=>(*a).b,K_INT=>( (*a).i!=0) as i8,K_FLOAT=>( (*a).f!=0.0) as i8,K_STRING=>(!read_string(a).is_empty()) as i8,_=>1}}}
+#[no_mangle] pub extern "C" fn plain_not(a:*mut PlainValue)->*mut PlainValue{if a.is_null(){return type_error("NOT needs a boolean")};unsafe{if (*a).kind!=K_BOOL{return type_error("NOT needs a boolean")}plain_bool(((*a).b==0) as i8)}}
+#[no_mangle] pub extern "C" fn plain_and(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{if a.is_null()||b.is_null(){return type_error("AND needs booleans")};unsafe{plain_bool(((*a).b!=0&&(*b).b!=0) as i8)}}
+#[no_mangle] pub extern "C" fn plain_or(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{if a.is_null()||b.is_null(){return type_error("OR needs booleans")};unsafe{plain_bool(((*a).b!=0||(*b).b!=0) as i8)}}
+
+#[no_mangle] pub extern "C" fn plain_list_new(n:i64,items:*mut *mut PlainValue)->*mut PlainValue{let mut v=Vec::new();unsafe{for i in 0..n{v.push(*items.add(i as usize));}}let out=value(K_LIST);unsafe{(*out).ptr=Box::into_raw(Box::new(List{items:v})) as *mut c_void};out}
+#[no_mangle] pub extern "C" fn plain_list_get(v:*mut PlainValue,idx:*mut PlainValue)->*mut PlainValue{if v.is_null()||idx.is_null(){return type_error("invalid list access")};unsafe{if (*v).kind!=K_LIST||(*idx).kind!=K_INT{return type_error("list index must be an int")};let l=&*((*v).ptr as *mut List);if (*idx).i<0||(*idx).i>=l.items.len() as i64{type_error("list index out of range")}else{l.items[(*idx).i as usize]}}}
+#[no_mangle] pub extern "C" fn plain_list_set(v:*mut PlainValue,idx:*mut PlainValue,item:*mut PlainValue)->*mut PlainValue{if v.is_null()||idx.is_null(){return type_error("invalid list assignment")};unsafe{if (*v).kind!=K_LIST||(*idx).kind!=K_INT{return type_error("list index must be an int")};let l=&mut *((*v).ptr as *mut List);if (*idx).i<0||(*idx).i>=l.items.len() as i64{type_error("list index out of range")}else{l.items[(*idx).i as usize]=item;plain_bool(1)}}}
+#[no_mangle] pub extern "C" fn plain_append(v:*mut PlainValue,item:*mut PlainValue)->*mut PlainValue{if v.is_null(){return type_error("APPEND needs a list")};unsafe{if (*v).kind!=K_LIST{return type_error("APPEND needs a list")};(*( (*v).ptr as *mut List)).items.push(item);plain_bool(1)}}
+#[no_mangle] pub extern "C" fn plain_remove(v:*mut PlainValue,idx:*mut PlainValue)->*mut PlainValue{if v.is_null()||idx.is_null(){return type_error("REMOVE needs a list and index")};unsafe{if (*v).kind!=K_LIST||(*idx).kind!=K_INT{return type_error("REMOVE expects list and int")};let l=&mut *((*v).ptr as *mut List);if (*idx).i<0||(*idx).i>=l.items.len() as i64{type_error("list index out of range")}else{l.items.remove((*idx).i as usize)}}}
+#[no_mangle] pub extern "C" fn plain_length(v:*mut PlainValue)->*mut PlainValue{if v.is_null(){return type_error("LENGTH needs a value")};unsafe{match (*v).kind{K_STRING=>plain_int(read_string(v).chars().count() as i64),K_LIST=>plain_int((*( (*v).ptr as *mut List)).items.len() as i64),K_DICT=>plain_int((*( (*v).ptr as *mut Dict)).items.len() as i64),_=>type_error("LENGTH supports strings, lists, and dictionaries")}}}
+#[no_mangle] pub extern "C" fn plain_upper(v:*mut PlainValue)->*mut PlainValue{if v.is_null()||unsafe{(*v).kind!=K_STRING}{return type_error("UPPER needs a string")};string_value(K_STRING,&read_string(v).to_uppercase())}
+#[no_mangle] pub extern "C" fn plain_lower(v:*mut PlainValue)->*mut PlainValue{if v.is_null()||unsafe{(*v).kind!=K_STRING}{return type_error("LOWER needs a string")};string_value(K_STRING,&read_string(v).to_lowercase())}
+#[no_mangle] pub extern "C" fn plain_split(v:*mut PlainValue,sep:*mut PlainValue)->*mut PlainValue{if v.is_null()||sep.is_null(){return type_error("SPLIT needs two strings")};unsafe{if (*v).kind!=K_STRING||(*sep).kind!=K_STRING{return type_error("SPLIT needs two strings")};let parts=read_string(v).split(&read_string(sep)).map(|s|string_value(K_STRING,s)).collect::<Vec<_>>();let out=value(K_LIST);(*out).ptr=Box::into_raw(Box::new(List{items:parts})) as *mut c_void;out}}
+
+#[no_mangle] pub extern "C" fn plain_dict_new(n:i64,pairs:*mut *mut PlainValue)->*mut PlainValue{let mut d=HashMap::new();unsafe{for i in 0..n{let k=*pairs.add((i*2) as usize);let v=*pairs.add((i*2+1) as usize);d.insert(value_to_string(k),v);}}let out=value(K_DICT);unsafe{(*out).ptr=Box::into_raw(Box::new(Dict{items:d})) as *mut c_void};out}
+#[no_mangle] pub extern "C" fn plain_dict_get(v:*mut PlainValue,key:*mut PlainValue)->*mut PlainValue{if v.is_null()||key.is_null(){return type_error("invalid dictionary access")};unsafe{if (*v).kind!=K_DICT{return type_error("expected a dictionary")};let d=&*((*v).ptr as *mut Dict);d.items.get(&value_to_string(key)).copied().unwrap_or_else(||type_error("dictionary key not found"))}}
+#[no_mangle] pub extern "C" fn plain_dict_set(v:*mut PlainValue,key:*mut PlainValue,item:*mut PlainValue)->*mut PlainValue{if v.is_null()||key.is_null(){return type_error("invalid dictionary assignment")};unsafe{if (*v).kind!=K_DICT{return type_error("expected a dictionary")};let d=&mut *((*v).ptr as *mut Dict);d.items.insert(value_to_string(key),item);plain_bool(1)}}
+
+#[no_mangle] pub extern "C" fn plain_new_instance()->*mut PlainValue{let out=value(K_DICT);unsafe{(*out).ptr=Box::into_raw(Box::new(Dict{items:HashMap::new()})) as *mut c_void};out}
+#[no_mangle] pub extern "C" fn plain_read(prompt:*mut PlainValue,kind:i32)->*mut PlainValue{if !prompt.is_null(){print!("{}: ",value_to_string(prompt));use std::io::Write;let _=std::io::stdout().flush();}let mut s=String::new();if std::io::stdin().read_line(&mut s).is_err(){return type_error("input failed")};let s=s.trim_end();match kind{K_INT=>s.parse::<i64>().map(|n|plain_int(n)).unwrap_or_else(|_|type_error("expected an integer")),K_FLOAT=>s.parse::<f64>().map(|n|plain_float(n)).unwrap_or_else(|_|type_error("expected a float")),K_BOOL=>match s.to_uppercase().as_str(){"TRUE"=>plain_bool(1),"FALSE"=>plain_bool(0),_=>type_error("expected TRUE or FALSE")},_=>string_value(K_STRING,s)}}
+
+#[no_mangle] pub extern "C" fn plain_mod(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{match(num(a),num(b)){(Ok(x),Ok(y))=>{if y==0.0{type_error("MOD by zero")}else{numeric_result(x%y,unsafe{(*a).kind==K_FLOAT||(*b).kind==K_FLOAT})}},(Err(e),_)|(_,Err(e))=>e}}
+#[no_mangle] pub extern "C" fn plain_abs(v:*mut PlainValue)->*mut PlainValue{match num(v){Ok(x)=>numeric_result(x.abs(),unsafe{(*v).kind==K_FLOAT}),Err(e)=>e}}
+#[no_mangle] pub extern "C" fn plain_sqrt(v:*mut PlainValue)->*mut PlainValue{match num(v){Ok(x)=>if x<0.0{type_error("SQRT needs a non-negative number")}else{plain_float(x.sqrt())},Err(e)=>e}}
+#[no_mangle] pub extern "C" fn plain_pow(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{match(num(a),num(b)){(Ok(x),Ok(y))=>plain_float(x.powf(y)),(Err(e),_)|(_,Err(e))=>e}}
+#[no_mangle] pub extern "C" fn plain_floor(v:*mut PlainValue)->*mut PlainValue{match num(v){Ok(x)=>plain_int(x.floor() as i64),Err(e)=>e}}
+#[no_mangle] pub extern "C" fn plain_ceil(v:*mut PlainValue)->*mut PlainValue{match num(v){Ok(x)=>plain_int(x.ceil() as i64),Err(e)=>e}}
+#[no_mangle] pub extern "C" fn plain_sin(v:*mut PlainValue)->*mut PlainValue{match num(v){Ok(x)=>plain_float(x.sin()),Err(e)=>e}}
+#[no_mangle] pub extern "C" fn plain_cos(v:*mut PlainValue)->*mut PlainValue{match num(v){Ok(x)=>plain_float(x.cos()),Err(e)=>e}}
+#[no_mangle] pub extern "C" fn plain_contains(v:*mut PlainValue,needle:*mut PlainValue)->*mut PlainValue{if v.is_null()||needle.is_null(){return type_error("CONTAINS needs two strings")};unsafe{if (*v).kind!=K_STRING||(*needle).kind!=K_STRING{return type_error("CONTAINS needs two strings")}};plain_bool(read_string(v).contains(&read_string(needle)) as i8)}
+#[no_mangle] pub extern "C" fn plain_starts_with(v:*mut PlainValue,needle:*mut PlainValue)->*mut PlainValue{if v.is_null()||needle.is_null(){return type_error("STARTS_WITH needs two strings")};unsafe{if (*v).kind!=K_STRING||(*needle).kind!=K_STRING{return type_error("STARTS_WITH needs two strings")}};plain_bool(read_string(v).starts_with(&read_string(needle)) as i8)}
+#[no_mangle] pub extern "C" fn plain_ends_with(v:*mut PlainValue,needle:*mut PlainValue)->*mut PlainValue{if v.is_null()||needle.is_null(){return type_error("ENDS_WITH needs two strings")};unsafe{if (*v).kind!=K_STRING||(*needle).kind!=K_STRING{return type_error("ENDS_WITH needs two strings")}};plain_bool(read_string(v).ends_with(&read_string(needle)) as i8)}
+#[no_mangle] pub extern "C" fn plain_join(v:*mut PlainValue,sep:*mut PlainValue)->*mut PlainValue{if v.is_null()||sep.is_null(){return type_error("JOIN needs a list and separator")};unsafe{if (*v).kind!=K_LIST||(*sep).kind!=K_STRING{return type_error("JOIN needs a list and separator")};let l=&*((*v).ptr as *mut List);string_value(K_STRING,&l.items.iter().map(|x|value_to_string(*x)).collect::<Vec<_>>().join(&read_string(sep)))}}
+#[no_mangle] pub extern "C" fn plain_range(start:*mut PlainValue,end:*mut PlainValue)->*mut PlainValue{match(num(start),num(end)){(Ok(a),Ok(b))=>{let mut items=Vec::new();let mut i=a as i64;let stop=b as i64;while i<=stop{items.push(plain_int(i));i+=1}let out=value(K_LIST);unsafe{(*out).ptr=Box::into_raw(Box::new(List{items})) as *mut c_void};out},(Err(e),_)|(_,Err(e))=>e}}
+
+#[no_mangle] pub extern "C" fn plain_not_eq(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{let r=plain_eq(a,b);if r.is_null(){return r};unsafe{if (*r).kind==K_BOOL{plain_bool(((*r).b==0) as i8)}else{r}}}
+#[no_mangle] pub extern "C" fn plain_lte(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{let l=plain_lt(a,b);let e=plain_eq(a,b);if plain_truth(l)!=0||plain_truth(e)!=0{plain_bool(1)}else{plain_bool(0)}}
+#[no_mangle] pub extern "C" fn plain_gte(a:*mut PlainValue,b:*mut PlainValue)->*mut PlainValue{let g=plain_gt(a,b);let e=plain_eq(a,b);if plain_truth(g)!=0||plain_truth(e)!=0{plain_bool(1)}else{plain_bool(0)}}
+
+#[no_mangle] pub extern "C" fn plain_read_file(path:*mut PlainValue)->*mut PlainValue{if path.is_null(){return type_error("READ_FILE needs a path")};unsafe{if (*path).kind!=K_STRING{return type_error("READ_FILE needs a string path")}};match std::fs::read_to_string(read_string(path)){Ok(s)=>string_value(K_STRING,&s),Err(e)=>type_error(&format!("READ_FILE failed: {}",e))}}
+#[no_mangle] pub extern "C" fn plain_write_file(path:*mut PlainValue,contents:*mut PlainValue)->*mut PlainValue{if path.is_null()||contents.is_null(){return type_error("WRITE_FILE needs path and contents")};unsafe{if (*path).kind!=K_STRING||(*contents).kind!=K_STRING{return type_error("WRITE_FILE needs two strings")}};match std::fs::write(read_string(path),read_string(contents)){Ok(())=>plain_bool(1),Err(e)=>type_error(&format!("WRITE_FILE failed: {}",e))}}
+#[no_mangle] pub extern "C" fn plain_env(name:*mut PlainValue)->*mut PlainValue{if name.is_null(){return type_error("ENV needs a name")};unsafe{if (*name).kind!=K_STRING{return type_error("ENV needs a string name")}};match std::env::var(read_string(name)){Ok(s)=>string_value(K_STRING,&s),Err(_)=>type_error("environment variable not found")}}
+#[no_mangle] pub extern "C" fn plain_now_ms()->*mut PlainValue{match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH){Ok(d)=>plain_int(d.as_millis() as i64),Err(_)=>type_error("system clock before Unix epoch")}}

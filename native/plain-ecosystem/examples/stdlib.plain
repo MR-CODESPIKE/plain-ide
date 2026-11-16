@@ -1,0 +1,17 @@
+LET a = 17 % 5
+SAY a
+SAY 3 != 4
+SAY 3 <= 3
+SAY 4 >= 3
+SAY SQRT(81)
+SAY POW(2, 8)
+SAY FLOOR(3.9)
+SAY CEIL(3.1)
+SAY CONTAINS("plain language", "lang")
+SAY STARTS_WITH("plain", "pl")
+SAY ENDS_WITH("plain", "ain")
+LET words = RANGE(1, 3)
+SAY JOIN(words, ",")
+SAY WRITE_FILE("/tmp/plain_io_test.txt", "hello from Plain")
+SAY READ_FILE("/tmp/plain_io_test.txt")
+SAY NOW_MS()

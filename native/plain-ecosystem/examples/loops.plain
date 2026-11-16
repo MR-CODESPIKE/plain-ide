@@ -1,0 +1,16 @@
+LET i = 0
+REPEAT i FROM 1 TO 3
+    SAY i
+END REPEAT
+LET x = 0
+REPEAT WHILE x < 3
+    SET x = x + 1
+    IF x = 2 THEN
+        CONTINUE
+    END IF
+    SAY x
+END REPEAT
+LET nums = [4, 5, 6]
+REPEAT FOR EACH n IN nums
+    SAY n
+END REPEAT

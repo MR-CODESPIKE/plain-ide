@@ -1,0 +1,13 @@
+EXTERN "plain_ml" FUNCTION plain_ffi_add_numbers(a AS int, b AS int) GIVES int
+EXTERN "plain_ml" FUNCTION plain_ml_train() GIVES any
+EXTERN "plain_ml" FUNCTION plain_ml_last_loss(agent AS any) GIVES float
+EXTERN "plain_ml" FUNCTION plain_ml_classify(agent AS any, x AS int, y AS int) GIVES string
+
+LET total = plain_ffi_add_numbers(2, 3)
+SAY total
+LET agent = plain_ml_train()
+SAY plain_ml_last_loss(agent)
+SAY plain_ml_classify(agent, 0, 0)
+SAY plain_ml_classify(agent, 0, 1)
+SAY plain_ml_classify(agent, 1, 0)
+SAY plain_ml_classify(agent, 1, 1)

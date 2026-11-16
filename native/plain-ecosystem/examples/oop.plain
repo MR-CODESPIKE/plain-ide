@@ -1,0 +1,47 @@
+# Object-oriented Plain: field defaults, constructor chaining with SUPER,
+# overriding with run-time dispatch, calling sibling methods, and the IS operator.
+CLASS Animal
+    LET name AS string
+    LET legs AS int = 4
+    LET tags AS [string]
+    TO NEW n AS string
+        SET name = n
+    END TO
+    TO describe GIVES string
+        GIVE BACK name + " has " + legs + " legs"
+    END TO
+    TO speak GIVES string
+        GIVE BACK name + " makes a sound"
+    END TO
+    TO introduce GIVES string
+        GIVE BACK describe() + " and " + speak()
+    END TO
+END CLASS
+
+CLASS Bird EXTENDS Animal
+    LET can_fly AS bool = TRUE
+    TO NEW n AS string
+        SUPER.NEW(n)
+        SET legs = 2
+    END TO
+    TO speak GIVES string
+        GIVE BACK SUPER.speak() + " (tweet)"
+    END TO
+END CLASS
+
+CLASS Dog EXTENDS Animal
+    TO speak GIVES string
+        GIVE BACK name + " barks"
+    END TO
+END CLASS
+
+LET dog = NEW Dog("Rex")
+LET bird = NEW Bird("Tweety")
+SAY dog.introduce()
+SAY bird.introduce()
+SAY dog IS Animal
+SAY dog IS Bird
+SAY bird IS Animal
+SAY bird.can_fly
+SAY LENGTH(dog.tags)
+SAY dog

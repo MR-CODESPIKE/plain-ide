@@ -1,0 +1,3 @@
+USE "helpers.plain"
+LET answer = twice(21)
+SAY answer
