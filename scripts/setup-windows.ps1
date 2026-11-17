@@ -16,6 +16,12 @@ $llvmPrefix = (& llvm-config --prefix).Trim()
 $env:LLVM_SYS_180_PREFIX = $llvmPrefix
 $env:LLVM_CONFIG_PATH = (Get-Command llvm-config).Source
 $env:LLVM_LINK_LLVM_DYLIB = '1'
+$liveIdeOrigin = 'https://plain-ide-kappa.vercel.app'
+$allowedOrigins = @($env:PLAIN_IDE_ORIGINS -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($allowedOrigins -notcontains $liveIdeOrigin) {
+  $allowedOrigins += $liveIdeOrigin
+}
+$env:PLAIN_IDE_ORIGINS = $allowedOrigins -join ','
 Push-Location $plainRoot
 try {
   cargo build --release --workspace

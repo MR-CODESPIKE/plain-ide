@@ -18,6 +18,11 @@ esac
 export LLVM_SYS_180_PREFIX="$(llvm-config --prefix)"
 export LLVM_CONFIG_PATH="$(command -v llvm-config)"
 export LLVM_LINK_LLVM_DYLIB=1
+LIVE_IDE_ORIGIN="https://plain-ide-kappa.vercel.app"
+case ",${PLAIN_IDE_ORIGINS:-}," in
+  *",$LIVE_IDE_ORIGIN,"*) ;;
+  *) export PLAIN_IDE_ORIGINS="${PLAIN_IDE_ORIGINS:+$PLAIN_IDE_ORIGINS,}$LIVE_IDE_ORIGIN" ;;
+esac
 cd "$PLAIN_ROOT"
 cargo build --release --workspace
 export PLAIN_COMPILER_PATH="$PLAIN_ROOT/target/release/plain"

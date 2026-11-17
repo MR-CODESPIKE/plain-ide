@@ -27,6 +27,11 @@ ln -sf "$(command -v clang-18)" "$HOME/.local/bin/clang"
 export LLVM_SYS_180_PREFIX="$("$LLVM_CONFIG" --prefix)"
 export LLVM_CONFIG_PATH="$LLVM_CONFIG"
 export LLVM_LINK_LLVM_DYLIB=1
+LIVE_IDE_ORIGIN="https://plain-ide-kappa.vercel.app"
+case ",${PLAIN_IDE_ORIGINS:-}," in
+  *",$LIVE_IDE_ORIGIN,"*) ;;
+  *) export PLAIN_IDE_ORIGINS="${PLAIN_IDE_ORIGINS:+$PLAIN_IDE_ORIGINS,}$LIVE_IDE_ORIGIN" ;;
+esac
 cd "$PLAIN_ROOT"
 cargo build --release --workspace
 export PLAIN_COMPILER_PATH="$PLAIN_ROOT/target/release/plain"

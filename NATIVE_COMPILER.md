@@ -91,7 +91,7 @@ The browser cannot cache external fonts anymore; system font fallbacks are used.
 
 ## Security model
 
-The bridge binds to loopback only and requires a random bearer token for compilation requests. It accepts only relative workspace paths, caps requests at 2 MiB/300 files, stages sources in a temporary directory, and removes that directory after each request. CORS is limited to localhost origins by default; set `PLAIN_IDE_ORIGINS` to a comma-separated list only if hosting the IDE on a trusted HTTPS origin.
+The bridge binds to loopback only and requires a random bearer token for compilation requests. It accepts only relative workspace paths, caps requests at 2 MiB/300 files, stages sources in a temporary directory, and removes that directory after each request. The platform setup scripts allow `https://plain-ide-kappa.vercel.app` and localhost origins; they preserve any additional comma-separated origins already set in `PLAIN_IDE_ORIGINS`. If you use a different trusted HTTPS deployment, add its exact origin to `PLAIN_IDE_ORIGINS` before starting the bridge.
 
 **Important:** Plain is a native language. Running a Plain program gives it the permissions of the logged-in OS user. The bridge is not a sandbox. Only run programs you trust, and do not expose the bridge to a LAN or public network.
 

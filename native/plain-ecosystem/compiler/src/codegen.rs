@@ -557,7 +557,7 @@ impl<'ctx> Codegen<'ctx>{
     // Stop before incrementing the inclusive upper bound, avoiding wraparound.
     let current=self.builder.build_load(self.ptr,slot,"loop_value").unwrap();
     let finished=self.runtime("plain_gte",&[current.into(),limit.into()]);
-    self.guard_value(finished)?;
+    self.guard_value(finished.into_pointer_value())?;
     let done=self.truth_of(finished.into());
     let increment=self.ctx.append_basic_block(fun,"repeat_increment");
     self.builder.build_conditional_branch(done,end,increment).unwrap();
