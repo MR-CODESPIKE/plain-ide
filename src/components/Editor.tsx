@@ -8,27 +8,27 @@ import { tags } from '@lezer/highlight';
 import { plainLanguage } from '../lib/plainLanguage';
 
 const plainHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: '#5ed8bf', fontWeight: '700' },
-  { tag: tags.typeName, color: '#d5a867' },
-  { tag: tags.string, color: '#c7d98a' },
-  { tag: tags.number, color: '#d89976' },
-  { tag: tags.comment, color: '#718790', fontStyle: 'italic' },
-  { tag: tags.operator, color: '#a8bac2' },
-  { tag: tags.variableName, color: '#d7e0e3' },
+  { tag: tags.keyword, color: '#ff8a2a', fontWeight: '700' },
+  { tag: tags.typeName, color: '#ffc078' },
+  { tag: tags.string, color: '#e7c991' },
+  { tag: tags.number, color: '#ffae75' },
+  { tag: tags.comment, color: '#8d8076', fontStyle: 'italic' },
+  { tag: tags.operator, color: '#c9bcb2' },
+  { tag: tags.variableName, color: '#eee5dc' },
 ]);
 
 const editorTheme = EditorView.theme({
-  '&': { height: '100%', backgroundColor: '#111a20', color: '#d9e2e5', fontSize: '13px' },
+  '&': { height: '100%', backgroundColor: '#101012', color: '#f1ece6', fontSize: '13px' },
   '.cm-scroller': { fontFamily: '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace', overflow: 'auto', lineHeight: '1.75' },
-  '.cm-content': { padding: '18px 0', caretColor: '#39d4b5' },
-  '.cm-gutters': { backgroundColor: '#111a20', color: '#51616a', border: 'none', paddingLeft: '10px' },
-  '.cm-activeLineGutter': { color: '#c4d1d5', backgroundColor: '#17242a' },
-  '.cm-activeLine': { backgroundColor: '#17242a66' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#39d4b5' },
-  '.cm-selectionBackground, ::selection': { backgroundColor: '#235e5a !important' },
-  '.cm-search': { backgroundColor: '#142129', color: '#e7efef', padding: '8px' },
-  '.cm-search input': { backgroundColor: '#0d1419', color: '#edf3f2', border: '1px solid #30414a', borderRadius: '4px' },
-  '.cm-search button': { color: '#c9d3d5', background: '#203039', border: '1px solid #344851', borderRadius: '4px' },
+  '.cm-content': { padding: '18px 0', caretColor: '#ff7a1a' },
+  '.cm-gutters': { backgroundColor: '#101012', color: '#857b74', border: 'none', paddingLeft: '10px' },
+  '.cm-activeLineGutter': { color: '#efe6de', backgroundColor: '#1b1716' },
+  '.cm-activeLine': { backgroundColor: '#ff7a1815' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#ff7a1a' },
+  '.cm-selectionBackground, ::selection': { backgroundColor: '#683712 !important' },
+  '.cm-search': { backgroundColor: '#171312', color: '#f3ece5', padding: '8px' },
+  '.cm-search input': { backgroundColor: '#0d0d0f', color: '#f5eee7', border: '1px solid #40383a', borderRadius: '4px' },
+  '.cm-search button': { color: '#e7ddd5', background: '#292222', border: '1px solid #4d403b', borderRadius: '4px' },
 }, { dark: true });
 
 interface Props {
